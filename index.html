@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Naive Bayes</title>
+  <link href="styles.css" rel="stylesheet" type="text/css">
+  <link href="https://fonts.googleapis.com/css?family=Roboto:400,500,700|Roboto+Mono:400,700|Material+Icons+Extended" rel="stylesheet">
+
+  <script type="text/javascript" src="imdb-reviews-pt-br.js"></script>
+  <script type="text/javascript" src="stopWords.js"></script>
+</head>
+
+<body>
+  <div class="toolbar">
+    <div class="divider"></div>
+    <span class="title">Naive Bayes - Classificação de Emoções</span>
+  </div>
+  <div class="content">
+    <form novalidate>
+      <div id="formulary" style="flex-direction: column; align-items: center;">
+        <button type="button" onclick="trainingItems()" style="width: 300px;">Realizar treinamento</button>
+        <div id="classifyForm" style="display: none;margin-top: 20px;">
+          <div class="divider"></div>
+          <button type="button" onclick="classifyTestsBase()" style="width: 500px;margin: 10px;">Classificar Frases da Base de Conhecimentos IMDB</button>
+          <ul id="classificationBase"></ul>
+          <div class="divider"></div>
+          <div style="display: flex;align-items: center;">
+            <div class="formgroup">
+              <label for="phraseClassify">Insira uma frase para verificar a classificação:</label>
+              <input type="text" placeholder="Insira a frase aqui" id="phraseClassify">
+              <div id="classification" style="font-size: 14px;width: 430px;">Classificação: </div>
+            </div>
+            <button type="button" onclick="classifyAnyPhrase()" style="margin-top: -15px;">Classificar Frase</button>
+          </div>
+        </div>
+      </div>
+      <div id="loader" style="display: none;">
+        <img src="splash.gif" alt="" style="    width: 50%;">
+        <h2>Realizando treinamento...</h2>
+      </div>
+    </form>
+    
+  </div>
+</body>
+<script>
+  // Global variables
+  var positivePhrases = []
+  var negativePhrases = []
+  var normalizedPositivePhrases = {}
+  var normalizedNegativePhrases = {}
+  var loading = false
+
+  function startStopLoader() {
+    loading = !loading
+    if (loading) {
+      document.getElementById('loader').style.display = ''
+      document.getElementById('formulary').style.display = 'none'
+    } else {
+      document.getElementById('loader').style.display = 'none'
+      document.getElementById('formulary').style.display = 'flex'
+    }
+  }
+
+  function trainingItems() {
+    startStopLoader()
+    setTimeout(() => {
+      new Promise(asyncTraining).then(() => {
+        startStopLoader()
+        document.getElementById('classifyForm').style.display = 'flex'
+      });
+    }, 0);
+  }
+
+  async function asyncTraining(resolve, reject) {
+    for (let i = 0; i < imdb.length; i++) {
+      const element = imdb[i];
+      element.sentiment === 'pos' ? positivePhrases.push(element) : negativePhrases.push(element)
+    }
+
+    // Pega 75% do total de frases positivas e negativas para treinamento
+    normalizedPositivePhrases = formatNormalize(positivePhrases.slice(0, (positivePhrases.length*0.75).toFixed(0)))
+    normalizedNegativePhrases = formatNormalize(negativePhrases.slice(0, (negativePhrases.length*0.75).toFixed(0)))
+    resolve()
+  }
+
+  function formatNormalize(array) {
+    var wordsCounter = {}
+    var totalWords = 0
+    for (let i = 0; i < array.length; i++) {
+      const element = array[i];
+      //Removendo stopWords
+      var removedStopWords = normalize(element.text_pt).filter(word => stopWords.indexOf(word) === -1)
+      
+      removedStopWords.forEach(word => {
+        wordsCounter[word] ? wordsCounter[word]++ : wordsCounter[word] = 1
+      });
+      totalWords += removedStopWords.length
+    }
+    return {wordsCounter, totalWords, totalUnitWords: Object.keys(wordsCounter).length};
+  }
+
+  function normalize(phrase) {
+    var lower = phrase.toLowerCase()
+    const regex = /[a-zA-Z\u00C0-\u00FF]+/gm;
+    var splitWord = lower.match(regex)
+    return splitWord != null ? splitWord : 0;
+  }
+
+  function classify(phrase, expectedClassify) {
+    var totalPos = Math.log10(positivePhrases.length / (positivePhrases.length + negativePhrases.length))
+    var totalNeg = Math.log10(negativePhrases.length / (positivePhrases.length + negativePhrases.length))
+
+    var norm = normalize(phrase)
+    for (let i = 0; i < norm.length; i++) {
+      const word = norm[i];
+      var wordPositiveCount = normalizedPositivePhrases.wordsCounter[word] || 0
+      totalPos += Math.log10((wordPositiveCount+1) / (normalizedPositivePhrases.totalWords + normalizedPositivePhrases.totalUnitWords + normalizedNegativePhrases.totalUnitWords))
+      
+      var wordNegativeCount = normalizedNegativePhrases.wordsCounter[word] || 0
+      totalNeg += Math.log10((wordNegativeCount+1) / (normalizedNegativePhrases.totalWords + normalizedNegativePhrases.totalUnitWords + normalizedPositivePhrases.totalUnitWords))
+    }
+
+    switch (expectedClassify) {
+      case 'pos':
+        return (totalPos > totalNeg)
+        break;
+      case 'neg':
+        return (totalNeg > totalPos)
+        break;
+      default:
+        return (totalPos > totalNeg)
+    }
+  }
+
+  function classifyTestsBase() {
+    // Pega os 25% restantes do total de frases positivas e negativas para validação da IA
+    var positivePhrasesBase = positivePhrases.slice((positivePhrases.length*0.75).toFixed(0))
+    var negativePhrasesBase = negativePhrases.slice((negativePhrases.length*0.75).toFixed(0))
+
+    var totalPosPerc = 0;
+    var totalNegPerc = 0;
+    for (let i = 0; i < positivePhrasesBase.length; i++) {
+      const element = positivePhrasesBase[i]
+      if (classify(element.text_pt, element.sentiment)) totalPosPerc++
+    }
+    for (let i = 0; i < negativePhrasesBase.length; i++) {
+      const element = negativePhrasesBase[i]
+      if (classify(element.text_pt, element.sentiment)) totalNegPerc++
+    }
+
+    totalPosPerc = totalPosPerc / positivePhrasesBase.length
+    totalNegPerc = totalNegPerc / negativePhrasesBase.length
+
+    html = `
+      <li>
+        <span>Percentual de Acertos para Frases Positivas: </span>
+        <strong style="color: #32cb00"> ${(totalPosPerc*100).toFixed(2)}%</strong>
+      </li>
+      <li>
+        <span>Percentual de Acertos para Frases Negativas: </span>
+        <strong style="color: #ba000d">${(totalNegPerc*100).toFixed(2)}%</strong>
+      </li>
+    `
+    document.getElementById('classificationBase').innerHTML = html;
+
+  }
+
+  function classifyAnyPhrase() {
+    const phrase = document.getElementById('phraseClassify').value
+    var html = ``;
+    if (classify(phrase))
+      html += `Classificação: <strong style="color: #32cb00">Frase Positiva</strong><span style="font-size: 24px"> 😁</span>`
+    else
+      html += `Classificação: <strong style="color: #ba000d">Frase Negativa</strong><span style="font-size: 24px"> 😠</span>`;
+
+    document.getElementById('classification').innerHTML = html
+  }
+</script>
+
+</html>
